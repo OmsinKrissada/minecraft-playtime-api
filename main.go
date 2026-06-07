@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,7 +13,10 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/gofiber/fiber/v3/middleware/logger"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const SERVER_DIR = "."
@@ -146,7 +150,27 @@ func main() {
 		return c.JSON(transformed)
 	})
 
+	app.Get("/metrics", adaptor.HTTPHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reg := prometheus.NewRegistry()
+		playtime := prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "minecraft_star_tech_playtime_hours",
+			},
+			[]string{"name", "uuid"},
+		)
+		reg.MustRegister(playtime)
+
+		pt := getAllPlaytime()
+		ls := getAllLastSeen()
+		transformed := transformResponse(pt, ls)
+
+		for _, p := range transformed {
+			labels := prometheus.Labels{"name": p.Name, "uuid": p.Uuid}
+			playtime.With(labels).Set(p.PlaytimeHr)
+		}
+
+		promhttp.HandlerFor(reg, promhttp.HandlerOpts{}).ServeHTTP(w, r)
+	}))
+
 	log.Fatal(app.Listen(":8080"))
-	uc := getUsernameMap()
-	log.Println(uc)
 }
